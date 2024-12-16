@@ -1,0 +1,414 @@
+---
+title: "Trabajo Final EEA: Análisis de Datos funcionales - aplicación al clustering"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+    toc_float: true 
+---
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("fda")
+#install.packages("fda.usc")
+#install.packages("ggplot2")
+
+library(fda)
+library(fda.usc)
+library(ggplot2)
+library(cluster)
+
+data(growth, package = "fda.usc")
+```
+
+# **1. Datos suavizados con la base B-splines**
+
+## **1.1 Comparación de datos discretos y funcionales con b-splines**
+
+```{r, include=TRUE}
+# Configuración para gráficos en una fila (1 fila, 2 columnas)
+par(mfrow = c(1, 2), mar = c(4, 4, 4, 2))  # Ajustar márgenes
+# Primer gráfico: Datos discretos
+# Vector de edades
+ages <- growth$age  # Extraer las edades reales
+# Expandir el vector de edades para igualar las dimensiones
+ages_fem <- rep(ages, times = ncol(growth$hgtf))  # Para niñas
+ages_mas <- rep(ages, times = ncol(growth$hgtm))  # Para niños
+# Convertir las matrices de alturas a vectores
+heights_fem <- as.vector(growth$hgtf)  # Alturas de niñas
+heights_mas <- as.vector(growth$hgtm)  # Alturas de niños
+# Crear el gráfico combinado
+plot(ages_fem, heights_fem, 
+     type = "p", pch = 16, col = rgb(1, 0, 0, 0.5),  # Rojo semitransparente
+     xlab = "Edad (anios)", ylab = "Altura (cm)", 
+     main = "Alturas por sexo, datos discretos",
+     xlim = range(ages), ylim = range(c(heights_fem, heights_mas)), axes = FALSE)
+# Añadir puntos para niños
+points(ages_mas, heights_mas, 
+       pch = 16, col = rgb(0, 0, 1, 0.5))  # Azul semitransparente
+# Añadir ejes con más secciones
+axis(1, at = seq(1, max(ages), by = 1), labels = seq(1, max(ages), by = 1))  # Eje x con secciones más detalladas
+axis(2)  # Eje y
+box()  # Cuadro alrededor del gráfico
+# Añadir una leyenda actualizada
+legend("bottomright", legend = c("Sexo femenino", "Sexo masculino"), 
+       pch = 16, col = c(rgb(1, 0, 0, 0.5), rgb(0, 0, 1, 0.5)))
+# Segundo gráfico: Curvas suavizadas (B-splines)
+# Definir la base B-spline
+basis <- create.bspline.basis(rangeval = range(ages), nbasis = 8)  # 8 funciones base
+# Ajustar datos discretos a curvas funcionales (niñas y niños)
+fd_fem <- Data2fd(argvals = ages, y = growth$hgtf, basisobj = basis)  # Niñas
+fd_mas <- Data2fd(argvals = ages, y = growth$hgtm, basisobj = basis)  # Niños
+# Evaluar las curvas funcionales para obtener valores suavizados
+smooth_fem <- eval.fd(ages, fd_fem)  # Evaluar para niñas
+smooth_mas <- eval.fd(ages, fd_mas)  # Evaluar para niños
+# Crear el gráfico con líneas suavizadas
+plot(ages, smooth_fem[, 1], type = "n", 
+     xlab = "Edad (anios)", ylab = "Altura (cm)", 
+     main = "Curvas suavizadas de alturas (B-splines)",
+     ylim = range(c(smooth_fem, smooth_mas)), axes = FALSE)
+# Dibujar líneas para todas las niñas
+for (i in 1:ncol(smooth_fem)) {
+  lines(ages, smooth_fem[, i], col = "red", lwd = 1)
+}
+# Dibujar líneas para todos los niños
+for (i in 1:ncol(smooth_mas)) {
+  lines(ages, smooth_mas[, i], col = "blue", lwd = 1)
+}
+# Añadir ejes con más divisiones
+axis(1, at = seq(1, max(ages), by = 1), labels = seq(1, max(ages), by = 1))  # Eje x detallado
+axis(2)  # Eje y
+box()  # Cuadro alrededor del gráfico
+# Añadir una leyenda
+legend("bottomright", legend = c("Sexo femenino", "Sexo masculino"), 
+       col = c("red", "blue"), lwd = 2)
+# Restablecer la configuración gráfica
+par(mfrow = c(1, 1))  # Volver a la configuración predeterminada
+```
+
+## **1.2 Cluster con datos discretos**
+
+
+```{r, include=TRUE}
+# Vector de edades y alturas discretas
+ages <- growth$age  # Edades
+heights_fem <- as.matrix(growth$hgtf)  # Alturas de niñas
+heights_mas <- as.matrix(growth$hgtm)  # Alturas de niños
+# Combinar datos discretos de niñas y niños
+heights_all <- cbind(heights_fem, heights_mas)
+# Paso 1: Normalizar los datos (opcional, según necesidad)
+heights_normalized <- scale(heights_all)
+# Paso 2: Calcular la distancia entre observaciones
+dist_matrix <- dist(t(heights_normalized))  # Transponer porque queremos distancias entre columnas (individuos)
+# Paso 3: Realizar clustering (k-means o jerárquico)
+set.seed(123)
+kmeans_model <- kmeans(t(heights_normalized), centers = 2, nstart = 25)
+# Evaluar el clustering
+sexo <- c(rep("Femenino", ncol(heights_fem)), rep("Masculino", ncol(heights_mas)))
+cluster_results <- data.frame(Sexo = sexo, Cluster = as.factor(kmeans_model$cluster))
+# Matriz de confusión
+confusion_matrix <- table(cluster_results$Sexo, cluster_results$Cluster)
+cat("Matriz de confusión:\n")
+print(confusion_matrix)
+# Coeficiente de silueta
+silhouette_scores <- silhouette(kmeans_model$cluster, dist_matrix)
+cat("Coeficiente de Silueta Promedio:", mean(silhouette_scores[, 3]), "\n")
+```
+
+## **1.3 Cluster solo con B-splines**
+
+```{r, include=TRUE}
+# Vector de edades
+ages <- growth$age
+# Paso 1: Definir la base B-spline
+basis <- create.bspline.basis(rangeval = range(ages), nbasis = 8)
+# Paso 2: Ajustar datos funcionales (altura)
+fd_fem <- Data2fd(argvals = ages, y = growth$hgtf, basisobj = basis)  # Niñas
+fd_mas <- Data2fd(argvals = ages, y = growth$hgtm, basisobj = basis)  # Niños
+# Combinar coeficientes funcionales de niñas y niños
+coef_fem <- fd_fem$coefs  # Coeficientes de niñas
+coef_mas <- fd_mas$coefs  # Coeficientes de niños
+coef_all <- t(cbind(coef_fem, coef_mas))  # Combinar y transponer para filas = individuos
+# Paso 3: Normalizar los coeficientes (opcional, para asegurar igualdad de escala)
+coef_normalized <- scale(coef_all)
+# Paso 4: Realizar clustering (k-means o jerárquico)
+set.seed(123)
+kmeans_model <- kmeans(coef_normalized, centers = 2, nstart = 25)
+# Evaluar el clustering
+sexo <- c(rep("Femenino", ncol(growth$hgtf)), rep("Masculino", ncol(growth$hgtm)))
+cluster_results <- data.frame(Sexo = sexo, Cluster = as.factor(kmeans_model$cluster))
+# Matriz de confusión
+confusion_matrix <- table(cluster_results$Sexo, cluster_results$Cluster)
+cat("Matriz de confusión:\n")
+print(confusion_matrix)
+# Coeficiente de silueta
+dist_matrix <- dist(coef_normalized)
+silhouette_scores <- silhouette(kmeans_model$cluster, dist_matrix)
+cat("Coeficiente de Silueta Promedio:", mean(silhouette_scores[, 3]), "\n")
+```
+# **2. Derivada y clustering en los datos funcionales**
+
+## **2.1 Derivada de datos funcionales**
+
+```{r, include=TRUE}
+# Vector de edades
+ages <- growth$age
+# Definir la base B-spline
+basis <- create.bspline.basis(rangeval = range(ages), nbasis = 8)
+# Ajustar datos a curvas funcionales (B-splines)
+fd_fem <- Data2fd(argvals = ages, y = growth$hgtf, basisobj = basis)  # Niñas
+fd_mas <- Data2fd(argvals = ages, y = growth$hgtm, basisobj = basis)  # Niños
+# Calcular la primera derivada (velocidad de crecimiento)
+fd_fem_deriv <- deriv.fd(fd_fem)  # Primera derivada de niñas
+fd_mas_deriv <- deriv.fd(fd_mas)  # Primera derivada de niños
+# Evaluar las derivadas en los puntos de tiempo (edades)
+smooth_fem_deriv <- eval.fd(ages, fd_fem_deriv)
+smooth_mas_deriv <- eval.fd(ages, fd_mas_deriv)
+# Crear un gráfico de las derivadas
+par(mfrow = c(1, 1))
+plot(ages, smooth_fem_deriv[, 1], type = "n", 
+     xlab = "Edad (anios)", ylab = "Velocidad de crecimiento (cm/anio)", 
+     main = "Velocidad de crecimiento (Primera derivada, B-splines)",
+     ylim = range(c(smooth_fem_deriv, smooth_mas_deriv)), axes = FALSE)
+
+# Dibujar líneas para todas las niñas
+for (i in 1:ncol(smooth_fem_deriv)) {
+  lines(ages, smooth_fem_deriv[, i], col = "red", lwd = 1)
+}
+# Dibujar líneas para todos los niños
+for (i in 1:ncol(smooth_mas_deriv)) {
+  lines(ages, smooth_mas_deriv[, i], col = "blue", lwd = 1)
+}
+# Personalizar los ejes
+axis(1, at = seq(1, max(ages), by = 0.5), labels = seq(1, max(ages), by = 0.5))  # Eje x con divisiones cada 0.5 años
+axis(2)  # Eje y
+box()  # Cuadro alrededor del gráfico
+# Añadir una leyenda
+legend("topright", legend = c("Sexo femenino", "Sexo masculino"), 
+       col = c("red", "blue"), lwd = 2)
+```
+
+## **2.2 K Means de la derivada de datos funcionales**
+```{r, include=TRUE}
+# Preparar los datos de derivadas
+# Combinar derivadas de niñas y niños
+smooth_fem_deriv_df <- as.data.frame(t(smooth_fem_deriv))  # Transponer derivadas de niñas
+smooth_mas_deriv_df <- as.data.frame(t(smooth_mas_deriv))  # Transponer derivadas de niños
+# Añadir etiquetas de sexo
+smooth_fem_deriv_df$sexo <- "Femenino"
+smooth_mas_deriv_df$sexo <- "Masculino"
+# Combinar ambos datasets
+deriv_data <- rbind(smooth_fem_deriv_df, smooth_mas_deriv_df)
+# Eliminar la columna de sexo para clustering
+deriv_features <- deriv_data[, -ncol(deriv_data)]
+# Aplicar k-means clustering
+set.seed(123)  # Para reproducibilidad
+kmeans_model <- kmeans(deriv_features, centers = 2, nstart = 25)
+# Añadir las asignaciones de clúster al dataset
+deriv_data$cluster <- as.factor(kmeans_model$cluster)
+# Evaluar métricas del clustering
+# Calcular el coeficiente de silueta
+silhouette_scores <- silhouette(kmeans_model$cluster, dist(deriv_features))
+# Mostrar métricas
+cat("Coeficiente de Silueta Promedio:", mean(silhouette_scores[, 3]), "\n")
+# Matriz de confusión entre clúster y sexo
+confusion_matrix <- table(deriv_data$sexo, deriv_data$cluster)
+print("Matriz de confusión entre sexo y clúster:")
+print(confusion_matrix)
+# Visualización de los clústeres en un espacio bidimensional (si aplicable)
+```
+
+## **2.3 Clustering Jerarquico de la derivada de datos funcionales**
+
+```{r}
+# Preparar los datos de derivadas (asumiendo que deriv_data ya está creado)
+# Crear una matriz de distancia usando la distancia euclidiana
+dist_matrix <- dist(deriv_features, method = "euclidean")
+
+# Realizar el clustering jerárquico
+hclust_model <- hclust(dist_matrix, method = "ward.D2")
+
+# Graficar el dendrograma
+plot(hclust_model,labels = FALSE, main = "Dendrograma de Clustering Jerárquico")
+
+# Cortar el dendrograma para obtener 2 clústeres
+cut_clusters <- cutree(hclust_model, k = 2)
+
+# Añadir las asignaciones de clúster al dataset
+deriv_data$cluster <- as.factor(cut_clusters)
+
+# Evaluar métricas del clustering
+# Calcular el coeficiente de silueta
+silhouette_scores <- silhouette(cut_clusters, dist_matrix)
+
+# Mostrar métricas
+cat("Coeficiente de Silueta Promedio:", mean(silhouette_scores[, 3]), "\n")
+
+# Matriz de confusión entre clúster y sexo
+confusion_matrix <- table(deriv_data$sexo, deriv_data$cluster)
+cat("Matriz de confusión entre sexo y clúster:\n")
+print(confusion_matrix)
+
+# Visualización de los clústeres en un espacio bidimensional (si aplicable)
+```
+
+
+# **3. Clustering con componenetes principales funcionales - FPCA**
+
+## **3.1 K Means de los FPCA de las curvas**
+```{r, include=TRUE}
+# Vector de edades
+ages <- growth$age
+
+# Paso 1: Definir la base B-spline
+basis <- create.bspline.basis(rangeval = range(ages), nbasis = 8)
+
+# Ajustar datos funcionales (altura)
+fd_fem <- Data2fd(argvals = ages, y = growth$hgtf, basisobj = basis)  # Niñas
+fd_mas <- Data2fd(argvals = ages, y = growth$hgtm, basisobj = basis)  # Niños
+
+# Combinar las curvas funcionales (altura)
+fd_all <- fd(cbind(fd_fem$coefs, fd_mas$coefs), basis)
+
+# Paso 2: Realizar FPCA sobre las curvas funcionales (altura)
+fpca_result <- pca.fd(fd_all, nharm = 3)  # Extraer las 3 primeras componentes principales
+
+# Obtener las puntuaciones principales de la FPCA
+fpca_scores <- fpca_result$scores
+rownames(fpca_scores) <- c(paste0("Femenino_", 1:54), paste0("Masculino_", 1:39))  # Etiquetas de sexo
+
+# Paso 3: Clustering con k-means
+set.seed(123)
+kmeans_model <- kmeans(fpca_scores, centers = 2, nstart = 25)
+
+# Evaluar el clustering
+sexo <- c(rep("Femenino", 54), rep("Masculino", 39))
+cluster_results <- data.frame(Sexo = sexo, Cluster = as.factor(kmeans_model$cluster))
+
+# Matriz de confusión
+confusion_matrix <- table(cluster_results$Sexo, cluster_results$Cluster)
+cat("Matriz de confusión:\n")
+print(confusion_matrix)
+
+# Coeficiente de silueta
+silhouette_scores <- silhouette(kmeans_model$cluster, dist(fpca_scores))
+cat("Coeficiente de Silueta Promedio:", mean(silhouette_scores[, 3]), "\n")
+
+# Visualizar los clústeres en el espacio de las dos primeras componentes principales
+plot(fpca_scores[, 1], fpca_scores[, 2], col = kmeans_model$cluster, pch = 16,
+     xlab = "Componente Principal 1 (Altura)", ylab = "Componente Principal 2 (Altura)",
+     main = "Clustering basado en FPCA sin derivadas")
+legend("topright", legend = c("Cluster 1", "Cluster 2"), col = 1:2, pch = 16)
+```
+
+## **3.2 K Means de los FPCA de las curvas derivadas**
+```{r, include=TRUE}
+library(fda)
+library(cluster)
+
+# Vector de edades
+ages <- growth$age
+
+# Paso 1: Definir la base B-spline
+basis <- create.bspline.basis(rangeval = range(ages), nbasis = 8)
+
+# Ajustar datos funcionales (altura)
+fd_fem <- Data2fd(argvals = ages, y = growth$hgtf, basisobj = basis)  # Niñas
+fd_mas <- Data2fd(argvals = ages, y = growth$hgtm, basisobj = basis)  # Niños
+
+# Paso 2: Calcular la derivada funcional (velocidad de crecimiento)
+fd_fem_deriv <- deriv.fd(fd_fem)  # Derivada funcional de niñas
+fd_mas_deriv <- deriv.fd(fd_mas)  # Derivada funcional de niños
+
+# Combinar derivadas funcionales (niñas y niños)
+fd_deriv_all <- fd(cbind(fd_fem_deriv$coefs, fd_mas_deriv$coefs), basis)
+
+# Paso 3: Realizar FPCA sobre las derivadas
+fpca_deriv_result <- pca.fd(fd_deriv_all, nharm = 3)  # Extraer las 3 primeras componentes principales
+
+# Obtener las puntuaciones principales de la FPCA de la derivada
+fpca_deriv_scores <- fpca_deriv_result$scores
+rownames(fpca_deriv_scores) <- c(paste0("Femenino_", 1:54), paste0("Masculino_", 1:39))  # Etiquetas de sexo
+
+# Paso 4: Clustering con k-means
+set.seed(123)
+kmeans_model <- kmeans(fpca_deriv_scores, centers = 2, nstart = 25)
+
+# Evaluar el clustering
+sexo <- c(rep("Femenino", 54), rep("Masculino", 39))
+cluster_results <- data.frame(Sexo = sexo, Cluster = as.factor(kmeans_model$cluster))
+
+# Matriz de confusión
+confusion_matrix <- table(cluster_results$Sexo, cluster_results$Cluster)
+cat("Matriz de confusión:\n")
+print(confusion_matrix)
+
+# Coeficiente de silueta
+silhouette_scores <- silhouette(kmeans_model$cluster, dist(fpca_deriv_scores))
+cat("Coeficiente de Silueta Promedio:", mean(silhouette_scores[, 3]), "\n")
+
+# Visualizar los clústeres en el espacio de las dos primeras componentes principales
+plot(fpca_deriv_scores[, 1], fpca_deriv_scores[, 2], col = kmeans_model$cluster, pch = 16,
+     xlab = "Componente Principal 1 (Derivada)", ylab = "Componente Principal 2 (Derivada)",
+     main = "K Means basado en FPCA de las derivadas")
+legend("topright", legend = c("Cluster 1", "Cluster 2"), col = 1:2, pch = 16)
+```
+
+
+
+## **3.3 Clustering Jerarquico de los FPCA de las curvas derivadas**
+```{r}
+library(fda)
+library(cluster)
+
+# Vector de edades
+ages <- growth$age
+
+# Paso 1: Definir la base B-spline
+basis <- create.bspline.basis(rangeval = range(ages), nbasis = 8)
+
+# Ajustar datos funcionales (altura)
+fd_fem <- Data2fd(argvals = ages, y = growth$hgtf, basisobj = basis)  # Niñas
+fd_mas <- Data2fd(argvals = ages, y = growth$hgtm, basisobj = basis)  # Niños
+
+# Paso 2: Calcular la derivada funcional (velocidad de crecimiento)
+fd_fem_deriv <- deriv.fd(fd_fem)  # Derivada funcional de niñas
+fd_mas_deriv <- deriv.fd(fd_mas)  # Derivada funcional de niños
+
+# Combinar derivadas funcionales (niñas y niños)
+fd_deriv_all <- fd(cbind(fd_fem_deriv$coefs, fd_mas_deriv$coefs), basis)
+
+# Paso 3: Realizar FPCA sobre las derivadas
+fpca_deriv_result <- pca.fd(fd_deriv_all, nharm = 6)  # Extraer las 6 primeras componentes principales
+
+# Obtener las puntuaciones principales de la FPCA de la derivada
+fpca_deriv_scores <- fpca_deriv_result$scores
+rownames(fpca_deriv_scores) <- c(paste0("Femenino_", 1:54), paste0("Masculino_", 1:39))  # Etiquetas de sexo
+
+# Paso 4: Clustering jerárquico
+dist_matrix <- dist(fpca_deriv_scores)  # Matriz de distancias
+hc_model <- hclust(dist_matrix, method = "ward.D2")  # Enlace por Ward
+
+# Cortar el dendrograma en 2 clusters
+clusters <- cutree(hc_model, k = 2)
+
+# Evaluar el clustering
+sexo <- c(rep("Femenino", 54), rep("Masculino", 39))
+cluster_results <- data.frame(Sexo = sexo, Cluster = as.factor(clusters))
+
+# Matriz de confusión
+confusion_matrix <- table(cluster_results$Sexo, cluster_results$Cluster)
+cat("Matriz de confusión:\n")
+print(confusion_matrix)
+
+# Coeficiente de silueta
+
+# Visualizar el dendrograma
+plot(hc_model, labels = FALSE, hang = -1, main = "Dendrograma del clustering jerárquico")
+
+# Visualizar los clústeres en el espacio de las dos primeras componentes principales
+plot(fpca_deriv_scores[, 1], fpca_deriv_scores[, 2], col = clusters, pch = 16,
+     xlab = "Componente Principal 1 (Derivada)", ylab = "Componente Principal 2 (Derivada)",
+     main = "Clustering jerárquico basado en FPCA de las derivadas")
+legend("topright", legend = c("Cluster 1", "Cluster 2"), col = 1:2, pch = 16)
+```
+
